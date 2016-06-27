@@ -1,5 +1,5 @@
-// Conversion from 2-D Matrix to 1-D Array allover
-// Border Replication and Debordering
+// Memory Usage Reduction by using only the pixels required
+// Reduction of time in Edge Hysteresis Stage
 
 
 #include <cv.h>
@@ -25,16 +25,14 @@ void getgrad(float *src1, float *src2, float *mag, float *dir);
 void nonmaxsup(float *mag, float *dir, float *dst);
 void doublethresh(float *nms, int *doublethr, int thresh1, int thresh2);
 void edgehyst(int *doublthr, int *cannyfinal);
-void mark(int h, int *map, int *visitedmap, int *dt);
+void mark(int h, int *visitedmap, int *dt, int *dst);
 void borderrep(int *img, int *borderimg);
 void deborderrep(float *borderimg, float *img);
 
-int flag = 0;
-
 int main()
 {
-//char image[] = "lena.jpg";
-//imgwrite(image);
+    char image[] = "lena.jpg";
+    imgwrite(image);
 
     char image_txt[] = "lena.txt";
     getdim(image_txt);
@@ -88,7 +86,7 @@ int main()
 
     cvNamedWindow("Out", CV_WINDOW_NORMAL);
     cvShowImage("Out", test);
-    //cvWaitKey(0);
+    cvWaitKey(0);
     cvSaveImage("inter.jpg", test, 0);
     return 0;
 
@@ -355,150 +353,98 @@ void edgehyst(int *dt, int *dst)
 {
 
     int *visitedmap = (int *)malloc(image_width*image_height*sizeof(int));
-    int *map = (int *)malloc(image_width*image_height*sizeof(int));
 
     for (int i = 0; i < image_height*image_width; i++)
     {
-        if (dt[i] == 255 || dt[i] == 0)
+        if (dt[i] == 0)
         {
             visitedmap[i] = 1;
             dst[i] = dt[i];
         }
+        else if (dt[i] == 255)
+            dst[i] = dt[i];
     }
 
     for (int i = 0; i < image_height*image_width; i++)
     {
-        if(dt[i] == 128)
-            mark(i, map, visitedmap, dt);
-
-
-        for (int g = 0; g < image_height*image_width; g++)
-        {
-            if (flag)
-            {
-                if (map[g] == 200)
-                {
-                    dst[g] = 255;
-                    map[g] = 0;
-                }
-            }
-            else if (!flag)
-            {
-                if (map[g] == 200)
-                {
-                    dst[g] = 0;
-                    map[g] = 0;
-                }
-            }
-
-        }
-        flag = 0;
+        if(dt[i] == 255)
+            mark(i, visitedmap, dt, dst);
     }
+
+    for (int k = 0; k < image_height*image_width; k++)
+            dst[k] = dst[k] * visitedmap[k];
 }
 
 
-void mark(int h, int *map, int *visitedmap, int *dt)
+void mark(int h, int *visitedmap, int *dt, int *dst)
 {
     if (visitedmap[h] == 1)
         return;
 
-    map[h] = 200;
     visitedmap[h] = 1;
 
 //1
     if (dt[h-image_width-1] == 128)
     {
-        mark(h-image_width-1, map, visitedmap, dt);
+        mark(h-image_width-1, visitedmap, dt, dst);
         visitedmap[h-image_width-1] = 1;
-        map[h-image_width-1] = 200;
-    }
-    else if (dt[h-image_width-1] == 255)
-    {
-        flag = 1;
+        dst[h-image_width-1] = 255;
     }
 
 //2
     if (dt[h-image_width] == 128)
     {
-        mark(h-image_width, map, visitedmap, dt);
+        mark(h-image_width, visitedmap, dt, dst);
         visitedmap[h-image_width] = 1;
-        map[h-image_width] = 200;
-    }
-    else if (dt[h-image_width] == 255)
-    {
-        flag = 1;
+        dst[h-image_width] = 255;
     }
 
 //3
     if (dt[h-image_width+1] == 128)
     {
-        mark(h-image_width+1, map, visitedmap, dt);
+        mark(h-image_width+1, visitedmap, dt, dst);
         visitedmap[h-image_width+1] = 1;
-        map[h-image_width+1] = 200;
-    }
-    else if (dt[h-image_width+1] == 255)
-    {
-        flag = 1;
+        dst[h-image_width+1] = 255;
     }
 
 //4
     if (dt[h-1] == 128)
     {
-        mark(h-1, map, visitedmap, dt);
+        mark(h-1, visitedmap, dt, dst);
         visitedmap[h-1] = 1;
-        map[h-1] = 200;
-    }
-    else if (dt[h-1] == 255)
-    {
-        flag = 1;
+        dst[h-1] = 255;
     }
 
 //5
     if (dt[h+1] == 128)
     {
-        mark(h+1, map, visitedmap, dt);
+        mark(h+1, visitedmap, dt, dst);
         visitedmap[h+1] = 1;
-        map[h+1] = 200;
-    }
-    else if (dt[h+1] == 255)
-    {
-        flag = 1;
+        dst[h+1] = 255;
     }
 
 //6
     if (dt[h+image_width-1] == 128)
     {
-        mark(h+image_width-1, map, visitedmap, dt);
+        mark(h+image_width-1, visitedmap, dt, dst);
         visitedmap[h+image_width-1] = 1;
-        map[h+image_width-1] = 200;
-    }
-    else if (dt[h+image_width-1] == 255)
-    {
-        flag = 1;
+        dst[h+image_width-1] = 255;
     }
 
 //7
     if (dt[h+image_width] == 128)
     {
-        mark(h+image_width, map, visitedmap, dt);
+        mark(h+image_width, visitedmap, dt, dst);
         visitedmap[h+image_width] = 1;
-        map[h+image_width] = 200;
-    }
-    else if (dt[h+image_width] == 255)
-    {
-        flag = 1;
+        dst[h+image_width] = 255;
     }
 
 //8
     if (dt[h+image_width+1] == 128)
     {
-        mark(h+image_width+1, map, visitedmap, dt);
+        mark(h+image_width+1, visitedmap, dt, dst);
         visitedmap[h+image_width+1] = 1;
-        map[h+image_width+1] = 200;
-    }
-    else if (dt[h+image_width+1] == 255)
-    {
-        flag = 1;
+        dst[h+image_width+1] = 255;
     }
 
     return;
