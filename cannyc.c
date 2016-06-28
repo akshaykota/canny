@@ -1,5 +1,8 @@
-// Memory Usage Reduction by using only the pixels required
+// Conversion from 2-D Matrix to 1-D Array allover
+// Border Replication and Debordering
+// Memory Usage Reduction by using only the pixels required (8 Rows of pixels processed at a time)
 // Reduction of time in Edge Hysteresis Stage
+// Change float type to int type allover
 
 
 #include <cv.h>
@@ -11,30 +14,30 @@
 #define SOBELY 0
 
 int image_height = 0, image_width = 0;
-int bordlen = 4;
+int bordlen = 10;
 int bord_image_height = 0, bord_image_width = 0;
 
-float minmax(float *img_array, int option);
-void gaussianfilter(int *src, float *dst);
-void sobelfilter(float *src, float *dst, int direction);
+int minmax(int *img_array, int option);
+void gaussianfilter(int *src, int *dst, int n);
+void sobelfilter(int *src, int *dst, int direction, int n);
 void imgwrite(char image_name[]);
 void imgread(char name[], int *img_data);
 void getdim(char name[]);
-void matmul(float *src1, float *src2, float *dst);
-void getgrad(float *src1, float *src2, float *mag, float *dir);
-void nonmaxsup(float *mag, float *dir, float *dst);
-void doublethresh(float *nms, int *doublethr, int thresh1, int thresh2);
+void matmul(int *src1, int *src2, int *dst);
+void getgrad(int *src1, int *src2, int *mag, int *dir, int n);
+void nonmaxsup(int *mag, int *dir, int *dst);
+void doublethresh(int *nms, int *doublethr, int thresh1, int thresh2);
 void edgehyst(int *doublthr, int *cannyfinal);
 void mark(int h, int *visitedmap, int *dt, int *dst);
 void borderrep(int *img, int *borderimg);
-void deborderrep(float *borderimg, float *img);
+void deborderrep(int *borderimg, int *img, int n);
 
 int main()
 {
-    char image[] = "lena.jpg";
+    char image[] = "doni.jpg";
     imgwrite(image);
 
-    char image_txt[] = "lena.txt";
+    char image_txt[] = "doni.txt";
     getdim(image_txt);
     int img_data[image_height*image_width];
     imgread(image_txt, img_data);
@@ -43,35 +46,72 @@ int main()
     bord_image_width = image_width + bordlen;
 
     int *borderimg = (int *)malloc(bord_image_height*bord_image_width*sizeof(int));
-    float *gaussian_image = (float *)malloc(bord_image_height*bord_image_width*sizeof(float));
-    float *sobel_x = (float *)malloc(bord_image_height*bord_image_width*sizeof(float));
-    float *sobel_y = (float *)malloc(bord_image_height*bord_image_width*sizeof(float));
-    float *sobel_xdeb = (float *)malloc(image_height*image_width*sizeof(float));
-    float *sobel_ydeb = (float *)malloc(image_height*image_width*sizeof(float));
-    float *gradmag = (float *)malloc(image_height*image_width*sizeof(float));
-    float *graddir = (float *)malloc(image_height*image_width*sizeof(float));
-    float *nms_image = (float *)malloc(image_height*image_width*sizeof(float));
+    int *gaussian_outputbuf = (int *)malloc(5*bord_image_width*sizeof(int));
+    int *sobel_x_outputbuf = (int *)malloc(3*bord_image_width*sizeof(int));
+    int *sobel_y_outputbuf = (int *)malloc(3*bord_image_width*sizeof(int));
+    int *sobel_xdeb = (int *)malloc(3*image_width*sizeof(int));
+    int *sobel_ydeb = (int *)malloc(3*image_width*sizeof(int));
+    int *gradmagbuf = (int *)malloc(3*image_width*sizeof(int));
+    int *graddirbuf = (int *)malloc(3*image_width*sizeof(int));
+    int *nms_image = (int *)malloc(image_height*image_width*sizeof(int));
     int *doublethr = (int *)malloc(image_height*image_width*sizeof(int));
     int *cannyfinal = (int *)malloc(image_height*image_width*sizeof(int));
 
     // Border Replicate
     borderrep(img_data, borderimg);
     // Convolution with Gaussian Kernel of size 5*5 and sigma = 1.4
-    gaussianfilter(borderimg, gaussian_image);
+    gaussianfilter(borderimg, gaussian_outputbuf, 5);
     // Convolution with Sobel Kernel of size 3*3 in x- and y- directions
-    sobelfilter(gaussian_image, sobel_x, SOBELX);
-    sobelfilter(gaussian_image, sobel_y, SOBELY);
+    sobelfilter(gaussian_outputbuf, sobel_x_outputbuf, SOBELX, 3);
+    sobelfilter(gaussian_outputbuf, sobel_y_outputbuf, SOBELY, 3);
     //Debordering
-    deborderrep(sobel_x, sobel_xdeb);
-    deborderrep(sobel_y, sobel_ydeb);
+    deborderrep(sobel_x_outputbuf, sobel_xdeb, 3);
+    deborderrep(sobel_y_outputbuf, sobel_ydeb, 3);
     // Getting Gradient Magnitude and Directions
-    getgrad(sobel_xdeb, sobel_ydeb, gradmag, graddir);
+    getgrad(sobel_xdeb, sobel_ydeb, gradmagbuf, graddirbuf, 3);
     // Non Maximum Suppression for Edge Localisation
-    nonmaxsup(gradmag, graddir, nms_image);
+    nonmaxsup(gradmagbuf, graddirbuf, nms_image);
+    nonmaxsup(&gradmagbuf[image_width], &graddirbuf[image_width], &nms_image[image_width]);
+
+    //-------------
+    for (int n = 2; n < image_height; n++)
+    {
+        for (int i = 0; i < 4*bord_image_width; i++)
+            gaussian_outputbuf[i] = gaussian_outputbuf[i + bord_image_width];
+        gaussianfilter(&borderimg[(n+3)*bord_image_width], &gaussian_outputbuf[4*bord_image_width], 1);
+
+        for (int i = 0; i < 2*bord_image_width; i++)
+        {
+            sobel_x_outputbuf[i] = sobel_x_outputbuf[i + bord_image_width];
+            sobel_y_outputbuf[i] = sobel_y_outputbuf[i + bord_image_width];
+        }
+
+        for (int i = 0; i < 2*image_width; i++)
+        {
+            sobel_xdeb[i] = sobel_xdeb[i + image_width];
+            sobel_ydeb[i] = sobel_ydeb[i + image_width];
+            gradmagbuf[i] = gradmagbuf[i + image_width];
+            graddirbuf[i] = graddirbuf[i + image_width];
+        }
+        sobelfilter(&gaussian_outputbuf[2*bord_image_width], &sobel_x_outputbuf[2*bord_image_width], SOBELX, 1);
+        sobelfilter(&gaussian_outputbuf[2*bord_image_width], &sobel_y_outputbuf[2*bord_image_width], SOBELY, 1);
+
+        deborderrep(&sobel_x_outputbuf[2*bord_image_width], &sobel_xdeb[2*image_width], 1);
+        deborderrep(&sobel_y_outputbuf[2*bord_image_width], &sobel_ydeb[2*image_width], 1);
+
+        getgrad(&sobel_xdeb[2*image_width], &sobel_ydeb[2*image_width], &gradmagbuf[2*image_width], &graddirbuf[2*image_width], 1);
+
+        nonmaxsup(&gradmagbuf[image_width], &graddirbuf[image_width], &nms_image[n*image_width]);
+    }
+    int maxval = minmax(nms_image, 1);
+    for (int i = 0; i < image_height*image_width; i++)
+        nms_image[i] = (int)((((float)nms_image[i])/maxval)*255);
+
     // Double Thresholding to classify weak and strong edges
-    doublethresh(nms_image, doublethr, 30, 70);
+    doublethresh(nms_image, doublethr, 30, 50);
     // Edge Tracking Algorithm
     edgehyst(doublethr, cannyfinal);
+
 
     IplImage *test = cvCreateImage(cvSize(image_width, image_height), IPL_DEPTH_8U, 1);
     uchar *test_data = (uchar *)test->imageData;
@@ -83,18 +123,17 @@ int main()
             *(test_data + i*image_width + j) = cannyfinal[j + i*image_width];
         }
     }
-
     cvNamedWindow("Out", CV_WINDOW_NORMAL);
     cvShowImage("Out", test);
     cvWaitKey(0);
-    cvSaveImage("inter.jpg", test, 0);
+    //cvSaveImage("inter.jpg", test, 0);
     return 0;
 
 }
 
-float minmax(float *img_array, int option)
+int minmax(int *img_array, int option)
 {
-    float val = 0;
+    int val = 0;
     if (option)
     {
         for (int i = 0; i < image_height*image_width; i++)
@@ -109,7 +148,7 @@ float minmax(float *img_array, int option)
 }
 
 
-void gaussianfilter(int *src, float *dst)
+void gaussianfilter(int *src, int *dst, int n)
 {
 
     float gaussian[25] = {0.003765, 0.015019, 0.023792, 0.015019, 0.003765,
@@ -121,15 +160,13 @@ void gaussianfilter(int *src, float *dst)
 
     int kernel_size = 5;
 
-    for (int l = 0; l < bord_image_height*bord_image_width; l++)
+    for (int l = 0; l < n*bord_image_width; l++)
     {
-        if (l >= bord_image_width*image_height )
-            dst[l] = dst[l - bord_image_width];
-        else if ((l%bord_image_width) >= (bord_image_width-bordlen) && (l%bord_image_width) < bord_image_width)
+        if ((l%bord_image_width) >= (bord_image_width-bordlen))
             dst[l] = dst[l-1];
         else
         {
-            int sum = 0;
+            float sum = 0;
             for (int i = 0; i < kernel_size; i++)
             {
                 for (int j = 0; j < kernel_size; j++)
@@ -137,23 +174,21 @@ void gaussianfilter(int *src, float *dst)
                     sum = sum + src[l + j + bord_image_width*i]*gaussian[j + kernel_size*i];
                 }
             }
-            dst[l] = sum;
+            dst[l] = (int)sum;
         }
     }
 }
 
-void sobelfilter(float *src, float *dst, int direction)
+void sobelfilter(int *src, int *dst, int direction, int n)
 {
     int kernel_size = 3;
-    for (int l = 0; l < bord_image_height*bord_image_width; l++)
+    for (int l = 0; l < n*bord_image_width; l++)
     {
-        if (l >= bord_image_width*image_height )
-            dst[l] = dst[l - bord_image_width];
-        else if ((l%bord_image_width) >= (bord_image_width-bordlen) && (l%bord_image_width) < bord_image_width)
+        if ((l%bord_image_width) >= (bord_image_width-bordlen))
             dst[l] = dst[l-1];
         else
         {
-            float sum = 0;
+            int sum = 0;
             if (direction)
             {
                 int sobel[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
@@ -184,7 +219,7 @@ void sobelfilter(float *src, float *dst, int direction)
     }
 }
 
-void matmul(float *src1, float *src2, float *dst)
+void matmul(int *src1, int *src2, int *dst)
 {
     for (int i = 0; i < image_height*image_width; i++)
         dst[i] = src1[i] * src2[i];
@@ -256,22 +291,22 @@ void getdim(char image_text[])
 }
 
 
-void getgrad(float *src1, float *src2, float *mag, float *dir)
+void getgrad(int *src1, int *src2, int *mag, int *dir, int n)
 {
-    for (int i = 0; i < image_height*image_width; i++)
+    for (int i = 0; i < n*image_width; i++)
     {
         if (src1[i] == 0)
             src1[i] = 0.0001;
 
-        mag[i] = sqrt(pow(src1[i], 2) + pow(src2[i], 2));
-        dir[i] = atan(src2[i]/src1[i]) * 180/3.142;
-        if (dir[i] > 67.5 && dir[i] < 90)
+        mag[i] = (int)sqrt(pow(src1[i], 2) + pow(src2[i], 2));
+        float angle = atan(((float)src2[i])/src1[i]) * 180/3.142;
+        if (angle > 67.5 && angle < 90)
             dir[i] = 90;
-        else if (dir[i] > 22.5 && dir[i] <= 67.5)
+        else if (angle > 22.5 && angle <= 67.5)
             dir[i] = 45;
-        else if (dir[i] > -22.5 && dir[i] <= 22.5)
+        else if (angle > -22.5 && angle <= 22.5)
             dir[i] = 0;
-        else if (dir[i] > -67.5 && dir[i] <= -22.5)
+        else if (angle > -67.5 && angle <= -22.5)
             dir[i] = -45;
         else
             dir[i] = -90;
@@ -279,16 +314,16 @@ void getgrad(float *src1, float *src2, float *mag, float *dir)
 }
 
 
-void nonmaxsup(float *mag, float *dir, float *dst)
+void nonmaxsup(int *mag, int *dir, int *dst)
 {
-    for (int i = 0; i < image_height*image_width; i++)
+    for (int i = 0; i < image_width; i++)
     {
         switch((int)dir[i])
         {
         case 90:
         {
             if (mag[i] >= mag[i-image_width] && mag[i] >= mag[i+image_width])
-                dst[i] = mag[i];
+                dst[i] = (int)mag[i];
             else
                 dst[i] = 0;
             break;
@@ -296,7 +331,7 @@ void nonmaxsup(float *mag, float *dir, float *dst)
         case 45:
         {
             if (mag[i] >= mag[i-image_width+1] && mag[i] >= mag[i+image_width-1])
-                dst[i] = mag[i];
+                dst[i] = (int)mag[i];
             else
                 dst[i] = 0;
             break;
@@ -304,7 +339,7 @@ void nonmaxsup(float *mag, float *dir, float *dst)
         case 0:
         {
             if (mag[i] >= mag[i+1] && mag[i] >= mag[i-1])
-                dst[i] = mag[i];
+                dst[i] = (int)mag[i];
             else
                 dst[i]= 0;
             break;
@@ -312,7 +347,7 @@ void nonmaxsup(float *mag, float *dir, float *dst)
         case -45:
         {
             if (mag[i] >= mag[i+image_width+1] && mag[i] >= mag[i-image_width-1])
-                dst[i] = mag[i];
+                dst[i] = (int)mag[i];
             else
                 dst[i] = 0;
             break;
@@ -320,7 +355,7 @@ void nonmaxsup(float *mag, float *dir, float *dst)
         case -90:
         {
             if (mag[i] >= mag[i-image_width] && mag[i] >= mag[i+image_width])
-                dst[i] = mag[i];
+                dst[i] = (int)mag[i];
             else
                 dst[i] = 0;
             break;
@@ -328,13 +363,9 @@ void nonmaxsup(float *mag, float *dir, float *dst)
         }
 
     }
-
-    float maxval = minmax(dst, 1);
-    for (int l = 0; l < image_height*image_width; l++)
-        dst[l] = (dst[l]/maxval)*255;
 }
 
-void doublethresh(float *nms, int *dt, int thresh1, int thresh2)
+void doublethresh(int *nms, int *dt, int thresh1, int thresh2)
 {
     for (int i = 0; i < image_height*image_width; i++)
     {
@@ -372,7 +403,7 @@ void edgehyst(int *dt, int *dst)
     }
 
     for (int k = 0; k < image_height*image_width; k++)
-            dst[k] = dst[k] * visitedmap[k];
+        dst[k] = dst[k] * visitedmap[k];
 }
 
 
@@ -468,14 +499,13 @@ void borderrep(int *img, int *borderimg)
             borderimg[i] = borderimg[i-1];
         else
             borderimg[i] = img[(i%bord_image_width)+(j*image_width)];
-
     }
 }
 
-void deborderrep(float *borderimg, float *deborderimg)
+void deborderrep(int *borderimg, int *deborderimg, int n)
 {
     int j = 0;
-    for (int i = 0; i < image_height*image_width; i++)
+    for (int i = 0; i < n*image_width; i++)
     {
         if (i%image_width == 0 && i > 0)
             j++;
